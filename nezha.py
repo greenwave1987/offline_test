@@ -3,25 +3,30 @@
 
 import os
 import json
-import requests
-from datetime import datetime, timedelta
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+import requests
 
-# ================= 配置 =================
+# ================= 基础配置 =================
 
-NEZHA_URL = os.getenv("NEZHA_URL", "").rstrip("/")
+NEZHA_URL = "https://nz.xmb.cc.cd"
+API_SERVER = "/api/v1/server"
+
 NEZHA_USER = os.getenv("NEZHA_USERNAME")
 NEZHA_PASS = os.getenv("NEZHA_PASSWORD")
+NEZHA_JWT  = os.getenv("NEZHA_JWT")   # 优先使用
 
 README_FILE = "README.md"
-UPTIME_FILE = Path("nezha_uptime.json")
+DATA_FILE   = Path("nezha_latency.json")
 
 TZ = ZoneInfo("Asia/Shanghai")
-OFFLINE_THRESHOLD = 60  # 秒
 
-START = "<!-- NEZHA-UPTIME-START -->"
-END   = "<!-- NEZHA-UPTIME-END -->"
+START = "<!-- NEZHA-LATENCY-START -->"
+END   = "<!-- NEZHA-LATENCY-END -->"
+
+OFFLINE_SECONDS = 60   # 超过 60 秒视为掉线
 
 # ================= 日志 =================
 
@@ -33,113 +38,131 @@ def log(msg):
 
 def create_session():
     s = requests.Session()
-    s.headers.update({
-        "User-Agent": "Mozilla/5.0 (GitHub Actions)",
-        "Accept": "application/json"
-    })
+    if NEZHA_JWT:
+        s.cookies.set("nz-jwt", NEZHA_JWT)
+        log("🍪 已注入 nz-jwt Cookie")
     return s
 
 # ================= 登录 =================
 
 def login(session):
-    log("🔐 开始登录哪吒面板")
-    log(f"POST {NEZHA_URL}/api/v1/login")
+    log("🔐 Cookie 失效，开始账号密码登录")
 
     r = session.post(
         f"{NEZHA_URL}/api/v1/login",
-        json={
-            "username": NEZHA_USER,
-            "password": NEZHA_PASS
-        },
-        timeout=15
+        json={"username": NEZHA_USER, "password": NEZHA_PASS},
+        timeout=10
     )
 
     log(f"登录 HTTP 状态码: {r.status_code}")
     r.raise_for_status()
 
-    cookies = session.cookies.get_dict()
-    log(f"🍪 登录后 Cookies: {cookies}")
+    if "nz-jwt" not in session.cookies.get_dict():
+        raise RuntimeError("❌ 登录失败，未获取 nz-jwt")
 
-    if "nz-jwt" not in cookies:
-        raise RuntimeError("❌ 登录失败：未获取 nz-jwt")
-
-    log("✅ 登录成功")
+    log("✅ 登录成功，已获得 nz-jwt")
 
 # ================= 获取服务器 =================
 
 def fetch_servers(session):
-    url = f"{NEZHA_URL}/api/v1/server"
+    url = NEZHA_URL + API_SERVER
     log(f"📡 请求服务器接口: {url}")
 
-    r = session.get(url, timeout=15)
+    r = session.get(url, timeout=10)
     log(f"HTTP 状态码: {r.status_code}")
+
+    if r.status_code in (401, 403):
+        raise PermissionError("Cookie 失效")
+
     r.raise_for_status()
 
-    payload = r.json()
+    j = r.json()
+    if not isinstance(j, dict) or "data" not in j:
+        raise RuntimeError("JSON 结构异常")
 
-    if not payload.get("success") or "data" not in payload:
-        raise RuntimeError("❌ JSON 结构异常")
-
-    servers = payload["data"]
-    log(f"📊 服务器总数: {len(servers)}")
-
-    return servers
+    log(f"✅ 成功获取服务器列表，共 {len(j['data'])} 台")
+    return j["data"]
 
 # ================= 在线判断 =================
 
-def is_online(server, now):
-    last_active_str = server.get("last_active")
-    if not last_active_str:
-        return False
+def is_online(last_active_str):
+    last = datetime.fromisoformat(last_active_str)
+    now = datetime.now(timezone.utc)
+    diff = (now - last.astimezone(timezone.utc)).total_seconds()
+    return diff <= OFFLINE_SECONDS
 
-    last_active = datetime.fromisoformat(last_active_str)
-    diff = (now - last_active).total_seconds()
+# ================= Ping 延迟 =================
 
-    return diff <= OFFLINE_THRESHOLD
+def ping_latency(ip):
+    try:
+        r = subprocess.run(
+            ["ping", "-c", "1", "-W", "1", ip],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True
+        )
+        if r.returncode != 0:
+            return 0
 
-# ================= 记录在线 =================
+        for line in r.stdout.splitlines():
+            if "time=" in line:
+                return float(line.split("time=")[1].split(" ")[0])
+    except Exception:
+        pass
 
-def record_hour(online):
-    now = datetime.now(TZ)
-    day = now.strftime("%Y-%m-%d")
-    hour = now.strftime("%H")
+    return 0
+
+# ================= 记录延迟 =================
+
+def record_latency(results):
+    now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
 
     data = {}
-    if UPTIME_FILE.exists():
-        data = json.loads(UPTIME_FILE.read_text())
+    if DATA_FILE.exists():
+        data = json.loads(DATA_FILE.read_text())
 
-    data.setdefault(day, {})
-    data[day][hour] = 1 if online else 0
+    data[now] = results
 
-    # 只保留 30 天
-    for d in sorted(data)[:-30]:
-        del data[d]
+    # 保留最近 48 条
+    while len(data) > 48:
+        data.pop(next(iter(data)))
 
-    UPTIME_FILE.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2)
-    )
+    DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    log("📝 延迟数据已记录")
 
-    log(f"📝 记录 {day} {hour}: {'在线' if online else '离线'}")
-
-# ================= 生成图 =================
+# ================= 生成曲线（文本） =================
 
 def generate_chart():
-    if not UPTIME_FILE.exists():
+    if not DATA_FILE.exists():
         return "暂无数据"
 
-    data = json.loads(UPTIME_FILE.read_text())
-    days = sorted(data)[-30:]
+    data = json.loads(DATA_FILE.read_text())
+    servers = set()
+
+    for v in data.values():
+        servers |= set(v.keys())
 
     lines = []
-    for h in range(23, -1, -1):
-        row = []
-        for d in days:
-            v = data.get(d, {}).get(f"{h:02d}", 0)
-            row.append("🟩" if v else "🟥")
-        lines.append(f"{h:02d}  " + " ".join(row))
+    for name in sorted(servers):
+        line = [name.ljust(16)]
+        for t in data:
+            v = data[t].get(name, 0)
+            if v == 0:
+                line.append("▁")
+            elif v < 50:
+                line.append("▂")
+            elif v < 100:
+                line.append("▃")
+            elif v < 200:
+                line.append("▄")
+            else:
+                line.append("█")
+        lines.append(" ".join(line))
 
     lines.append("")
-    lines.append("     " + " ".join(days))
+    lines.append("时间 → " + " ".join(data.keys()))
+    lines.append("▁=0ms  ▂<50  ▃<100  ▄<200  █>=200")
+
     return "\n".join(lines)
 
 # ================= 更新 README =================
@@ -149,50 +172,54 @@ def update_readme(chart):
 
     block = (
         f"{START}\n"
-        "## 📈 最近 30 天在线状态（每小时）\n\n"
-        "🟩 在线　🟥 离线（last_active 超过 60 秒）\n\n"
+        "## 🌐 各服务器延迟曲线（Ping）\n\n"
         "```\n"
         f"{chart}\n"
         "```\n"
         f"{END}"
     )
 
-    if START in content and END in content:
-        new = content.split(START)[0] + block + content.split(END)[1]
-    else:
-        new = content.rstrip() + "\n\n" + block
-
+    new = content.split(START)[0] + block + content.split(END)[1]
     Path(README_FILE).write_text(new, encoding="utf-8")
     log("✅ README 已更新")
 
 # ================= 主入口 =================
 
 def main():
-    log("🚀 哪吒 README 状态任务启动")
+    log("🚀 哪吒延迟监控任务启动")
 
     session = create_session()
-    login(session)
 
-    servers = fetch_servers(session)
+    try:
+        servers = fetch_servers(session)
+    except PermissionError:
+        login(session)
+        servers = fetch_servers(session)
 
-    now = datetime.now(TZ)
-
-    online_servers = []
-    offline_servers = []
+    results = {}
 
     for s in servers:
-        name = s.get("name", "unknown")
-        if is_online(s, now):
-            online_servers.append(name)
-            log(f"🟢 在线: {name}")
-        else:
-            offline_servers.append(name)
-            log(f"🔴 离线: {name}")
+        name = s.get("name", "unknown").strip()
+        ip = (
+            s.get("geoip", {})
+             .get("ip", {})
+             .get("ipv4_addr")
+            or s.get("geoip", {})
+                 .get("ip", {})
+                 .get("ipv6_addr")
+        )
 
-    overall_online = len(online_servers) > 0
-    log(f"📊 在线 {len(online_servers)} / 离线 {len(offline_servers)}")
+        if not ip:
+            results[name] = 0
+            continue
 
-    record_hour(overall_online)
+        online = is_online(s["last_active"])
+        latency = ping_latency(ip) if online else 0
+
+        results[name] = latency
+        log(f"{name}: {'在线' if online else '离线'} 延迟 {latency} ms")
+
+    record_latency(results)
 
     chart = generate_chart()
     update_readme(chart)

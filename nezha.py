@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 NEZHA_URL = os.getenv("NEZHA_URL", "").rstrip("/")
 NEZHA_USER = os.getenv("NEZHA_USERNAME")
 NEZHA_PASS = os.getenv("NEZHA_PASSWORD")
-NEZHA_JWT  = os.getenv("NEZHA_JWT")  # 推荐直接用
+NEZHA_JWT  = os.getenv("NEZHA_JWT")  # 可选，推荐
 
 README_FILE = "README.md"
 UPTIME_FILE = Path("nezha_uptime.json")
@@ -33,62 +33,79 @@ def log(msg):
 
 def create_session():
     s = requests.Session()
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0 (GitHub Actions)",
+        "Accept": "application/json"
+    })
+
     if NEZHA_JWT:
         s.cookies.set("nz-jwt", NEZHA_JWT)
-        log("🍪 使用 nz-jwt Cookie")
+        log("🍪 已注入 nz-jwt Cookie")
+
     return s
 
 # ================= 登录 =================
 
 def login(session):
-    log("🔐 Cookie 失效，尝试登录")
+    log("🔐 开始登录哪吒面板")
+    log(f"POST {NEZHA_URL}/api/v1/login")
+
+    payload = {
+        "username": NEZHA_USER,
+        "password": NEZHA_PASS
+    }
 
     r = session.post(
         f"{NEZHA_URL}/api/v1/login",
-        json={"username": NEZHA_USER, "password": NEZHA_PASS},
-        timeout=10
+        json=payload,
+        timeout=15
     )
 
-    log(f"登录状态码: {r.status_code}")
+    log(f"登录 HTTP 状态码: {r.status_code}")
     r.raise_for_status()
 
-    if "nz-jwt" not in session.cookies.get_dict():
-        raise RuntimeError("登录失败：未获取 nz-jwt")
+    cookies = session.cookies.get_dict()
+    log(f"🍪 当前 Cookies: {cookies}")
 
-    log("✅ 登录成功")
+    if "nz-jwt" not in cookies:
+        raise RuntimeError("❌ 登录失败：未获取 nz-jwt")
 
-# ================= 获取服务器（核心） =================
+    log("✅ 登录成功，nz-jwt 已获取")
+
+# ================= 获取服务器（唯一接口） =================
 
 def fetch_servers(session):
-    endpoints = [
-        "/api/v1/server",
-        "/api/v1/server/list",
-        "/api/v1/monitor",
-    ]
+    url = f"{NEZHA_URL}/api/v1/server"
+    log(f"📡 请求服务器接口: {url}")
 
-    for ep in endpoints:
-        url = NEZHA_URL + ep
-        log(f"📡 尝试接口 {ep}")
+    r = session.get(url, timeout=15)
+    log(f"HTTP 状态码: {r.status_code}")
 
-        r = session.get(url, timeout=10)
-        log(f"HTTP {r.status_code}")
+    if r.status_code in (401, 403):
+        raise PermissionError("Cookie 无效或过期")
 
-        if r.status_code in (401, 403):
-            raise PermissionError("Cookie 失效")
+    r.raise_for_status()
 
-        if r.status_code != 200:
-            continue
+    # 🚨 强制 JSON
+    try:
+        payload = r.json()
+    except Exception as e:
+        log("❌ 返回内容不是 JSON")
+        raise RuntimeError("接口返回非 JSON") from e
 
-        try:
-            data = r.json().get("data", [])
-        except Exception:
-            continue
+    if not isinstance(payload, dict) or "data" not in payload:
+        raise RuntimeError("JSON 结构异常")
 
-        if isinstance(data, list) and data:
-            log(f"✅ 接口 {ep} 成功，服务器数 {len(data)}")
-            return data
+    servers = payload["data"]
 
-    raise RuntimeError("❌ 未发现可用的哪吒服务器接口")
+    if not isinstance(servers, list):
+        raise RuntimeError("服务器数据不是列表")
+
+    log(f"📊 服务器总数: {len(servers)}")
+    offline = sum(1 for s in servers if not s.get("online", True))
+    log(f"🚨 离线服务器数: {offline}")
+
+    return servers
 
 # ================= 记录在线 =================
 
@@ -104,11 +121,15 @@ def record_hour(online):
     data.setdefault(day, {})
     data[day][hour] = 1 if online else 0
 
+    # 只保留 30 天
     for d in sorted(data)[:-30]:
         del data[d]
 
-    UPTIME_FILE.write_text(json.dumps(data, ensure_ascii=False))
-    log(f"📝 记录 {day} {hour}: {'在线' if online else '离线'}")
+    UPTIME_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2)
+    )
+
+    log(f"📝 记录在线状态 {day} {hour}: {'在线' if online else '离线'}")
 
 # ================= 生成图 =================
 
@@ -146,7 +167,11 @@ def update_readme(chart):
         f"{END}"
     )
 
-    new = content.split(START)[0] + block + content.split(END)[1]
+    if START in content and END in content:
+        new = content.split(START)[0] + block + content.split(END)[1]
+    else:
+        new = content.rstrip() + "\n\n" + block
+
     Path(README_FILE).write_text(new, encoding="utf-8")
     log("✅ README 已更新")
 
@@ -160,6 +185,7 @@ def main():
     try:
         servers = fetch_servers(session)
     except PermissionError:
+        log("⚠️ Cookie 失效，准备登录")
         login(session)
         servers = fetch_servers(session)
 

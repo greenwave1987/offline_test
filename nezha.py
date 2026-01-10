@@ -72,7 +72,7 @@ def login_and_get_session():
         log("❌ 未获取到 nz-jwt（账号或密码错误？）")
         sys.exit(1)
 
-    nz-jwt = cookies["nz-jwt"]
+    nz_jwt = cookies["nz-jwt"]
     log(f"✅ 登录成功，Session: {nz-jwt[:6]}***{nz-jwt[-6:]}")
 
     return sess

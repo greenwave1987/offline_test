@@ -9,7 +9,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 import requests
 
-# ================= 基础配置 =================
+# ================= 配置 =================
 
 NEZHA_URL = "https://nz.xmb.cc.cd"
 API_SERVER = "/api/v1/server"
@@ -19,7 +19,7 @@ NEZHA_PASS = os.getenv("NEZHA_PASSWORD")
 NEZHA_JWT  = os.getenv("NEZHA_JWT")
 
 README_FILE = "README.md"
-DATA_FILE   = Path("nezha_latency.json")
+DATA_FILE = Path("nezha_latency.json")
 
 TZ = ZoneInfo("Asia/Shanghai")
 OFFLINE_SECONDS = 60
@@ -31,7 +31,7 @@ END   = "<!-- NEZHA-LATENCY-END -->"
 
 def log(msg):
     now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{now}] {msg}")
+    print(f"[{now}] {msg}", flush=True)
 
 # ================= Session =================
 
@@ -39,13 +39,15 @@ def create_session():
     s = requests.Session()
     if NEZHA_JWT:
         s.cookies.set("nz-jwt", NEZHA_JWT)
-        log("🍪 使用 nz-jwt Cookie")
+        log("🍪 已注入 nz-jwt Cookie")
+    else:
+        log("⚠️ 未提供 nz-jwt，将依赖登录")
     return s
 
 # ================= 登录 =================
 
 def login(session):
-    log("🔐 Cookie 失效，开始登录")
+    log("🔐 开始登录哪吒面板")
 
     r = session.post(
         f"{NEZHA_URL}/api/v1/login",
@@ -54,14 +56,17 @@ def login(session):
     )
 
     log(f"登录 HTTP 状态码: {r.status_code}")
+    log(f"登录返回内容: {r.text[:200]}")
+
     r.raise_for_status()
 
-    if "nz-jwt" not in session.cookies.get_dict():
-        raise RuntimeError("❌ 登录失败，未获取 nz-jwt")
+    cookies = session.cookies.get_dict()
+    if "nz-jwt" not in cookies:
+        raise RuntimeError("❌ 登录失败：未获取 nz-jwt")
 
-    log("✅ 登录成功")
+    log("✅ 登录成功，已获取 nz-jwt")
 
-# ================= 获取服务器 =================
+# ================= 获取服务器（关键） =================
 
 def fetch_servers(session):
     url = NEZHA_URL + API_SERVER
@@ -70,11 +75,6 @@ def fetch_servers(session):
     r = session.get(url, timeout=10)
     log(f"HTTP 状态码: {r.status_code}")
 
-    if r.status_code in (401, 403):
-        raise PermissionError("Cookie 失效")
-
-    r.raise_for_status()
-
     try:
         j = r.json()
     except Exception:
@@ -82,32 +82,25 @@ def fetch_servers(session):
         log(r.text[:300])
         raise
 
-    # ===== 关键兼容逻辑 =====
-    servers = None
+    # ===== 关键修复点 =====
+    if isinstance(j, dict) and j.get("error") == "ApiErrorUnauthorized":
+        log("🚫 接口返回 ApiErrorUnauthorized（虽然是 200）")
+        raise PermissionError("API 未授权")
 
-    if isinstance(j, dict):
-        if "data" in j and isinstance(j["data"], list):
-            servers = j["data"]
-        else:
-            log(f"⚠️ JSON dict 但无 data 字段，keys={list(j.keys())}")
-    elif isinstance(j, list):
-        servers = j
-
-    if servers is None:
-        log("❌ 无法识别的 JSON 结构")
+    if not isinstance(j, dict) or "data" not in j or not isinstance(j["data"], list):
+        log("❌ JSON 结构异常")
         log(json.dumps(j, ensure_ascii=False)[:500])
-        raise RuntimeError("服务器数据结构不支持")
+        raise RuntimeError("服务器数据结构异常")
 
-    log(f"✅ 成功解析服务器列表：{len(servers)} 台")
-    return servers
+    log(f"✅ 成功获取服务器列表：{len(j['data'])} 台")
+    return j["data"]
 
 # ================= 在线判断 =================
 
-def is_online(last_active_str):
-    last = datetime.fromisoformat(last_active_str)
+def is_online(last_active):
+    t = datetime.fromisoformat(last_active)
     now = datetime.now(timezone.utc)
-    diff = (now - last.astimezone(timezone.utc)).total_seconds()
-    return diff <= OFFLINE_SECONDS
+    return (now - t.astimezone(timezone.utc)).total_seconds() <= OFFLINE_SECONDS
 
 # ================= Ping =================
 
@@ -129,7 +122,7 @@ def ping_latency(ip):
         pass
     return 0
 
-# ================= 记录数据 =================
+# ================= 记录 =================
 
 def record_latency(results):
     now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
@@ -144,37 +137,31 @@ def record_latency(results):
         data.pop(next(iter(data)))
 
     DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
-    log("📝 延迟数据已保存")
+    log("📝 延迟数据已记录")
 
-# ================= 曲线 =================
+# ================= 图 =================
 
 def generate_chart():
     if not DATA_FILE.exists():
         return "暂无数据"
 
     data = json.loads(DATA_FILE.read_text())
-    servers = set(k for v in data.values() for k in v)
+    servers = sorted({k for v in data.values() for k in v})
 
     lines = []
-    for s in sorted(servers):
+    for s in servers:
         row = [s.ljust(18)]
         for t in data:
             v = data[t].get(s, 0)
-            if v == 0:
-                row.append("▁")
-            elif v < 50:
-                row.append("▂")
-            elif v < 100:
-                row.append("▃")
-            elif v < 200:
-                row.append("▄")
-            else:
-                row.append("█")
+            row.append("▁" if v == 0 else
+                       "▂" if v < 50 else
+                       "▃" if v < 100 else
+                       "▄" if v < 200 else
+                       "█")
         lines.append(" ".join(row))
 
     lines.append("")
-    lines.append("▁=0ms ▂<50 ▃<100 ▄<200 █>=200")
-
+    lines.append("▁=离线 ▂<50ms ▃<100ms ▄<200ms █>=200ms")
     return "\n".join(lines)
 
 # ================= README =================
@@ -184,7 +171,7 @@ def update_readme(chart):
 
     block = (
         f"{START}\n"
-        "## 🌐 各服务器 Ping 延迟曲线\n\n"
+        "## 🌐 各服务器 Ping 延迟趋势\n\n"
         "```\n"
         f"{chart}\n"
         "```\n"
@@ -195,7 +182,7 @@ def update_readme(chart):
     Path(README_FILE).write_text(new, encoding="utf-8")
     log("✅ README 更新完成")
 
-# ================= 主入口 =================
+# ================= 主流程 =================
 
 def main():
     log("🚀 哪吒延迟监控任务启动")
@@ -205,6 +192,7 @@ def main():
     try:
         servers = fetch_servers(session)
     except PermissionError:
+        log("♻️ 触发登录流程")
         login(session)
         servers = fetch_servers(session)
 

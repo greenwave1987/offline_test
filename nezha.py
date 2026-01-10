@@ -10,9 +10,10 @@ from zoneinfo import ZoneInfo
 
 # ================= 基础配置 =================
 
-NEZHA_URL = os.getenv("NEZHA_URL")          # https://nz.example.com
+NEZHA_URL = os.getenv("NEZHA_URL", "").rstrip("/")
 NEZHA_USER = os.getenv("NEZHA_USERNAME")
 NEZHA_PASS = os.getenv("NEZHA_PASSWORD")
+NEZHA_JWT = os.getenv("NEZHA_JWT")  # 可选
 
 README_FILE = "README.md"
 UPTIME_FILE = Path("nezha_uptime.json")
@@ -28,46 +29,60 @@ def log(msg):
     now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{now}] {msg}")
 
+# ================= 会话初始化 =================
+
+def create_session():
+    s = requests.Session()
+    if NEZHA_JWT:
+        s.cookies.set("nz-jwt", NEZHA_JWT)
+        log("🍪 已注入 nz-jwt Cookie")
+    return s
+
 # ================= 登录 =================
 
-def nezha_login():
-    log("🔐 正在登录哪吒面板")
+def login(session: requests.Session):
+    log("🔐 Cookie 无效，尝试登录获取新 nz-jwt")
 
-    url = f"{NEZHA_URL}/api/v1/login"
-    payload = {
-        "username": NEZHA_USER,
-        "password": NEZHA_PASS
-    }
+    if not NEZHA_USER or not NEZHA_PASS:
+        raise RuntimeError("未提供 NEZHA_USERNAME / NEZHA_PASSWORD")
 
-    r = requests.post(url, json=payload, timeout=10)
-    log(f"HTTP 状态码: {r.status_code}")
+    r = session.post(
+        f"{NEZHA_URL}/api/v1/login",
+        json={
+            "username": NEZHA_USER,
+            "password": NEZHA_PASS
+        },
+        timeout=10
+    )
 
+    log(f"登录 HTTP 状态码: {r.status_code}")
     r.raise_for_status()
 
-    cookies = r.cookies.get_dict()
+    cookies = session.cookies.get_dict()
     if "nz-jwt" not in cookies:
-        raise RuntimeError("未获取到 nz-jwt")
+        raise RuntimeError("登录成功但未获取 nz-jwt")
 
-    log("✅ 登录成功")
+    log("✅ 登录成功，已获取新 nz-jwt")
     return cookies["nz-jwt"]
 
-# ================= 获取服务器 =================
+# ================= 获取服务器列表 =================
 
-def fetch_servers(jwt):
-    log("📡 请求服务器列表 API")
+def fetch_servers(session: requests.Session):
+    log("📡 请求服务器列表")
 
-    url = f"{NEZHA_URL}/api/v1/server/list"
-    headers = {
-        "cookie": jwt
-    }
+    r = session.get(
+        f"{NEZHA_URL}/api/v1/server/list",
+        timeout=10
+    )
 
-    r = requests.get(url, headers=headers, timeout=10)
     log(f"HTTP 状态码: {r.status_code}")
-    r.raise_for_status()
 
-    data = r.json().get("data", [])
-    log(f"📊 服务器总数: {len(data)}")
-    return data
+    # Cookie 失效 / 未登录
+    if r.status_code in (401, 403):
+        raise PermissionError("Cookie 失效")
+
+    r.raise_for_status()
+    return r.json().get("data", [])
 
 # ================= 记录小时状态 =================
 
@@ -92,7 +107,7 @@ def record_hour_status(is_online: bool):
         encoding="utf-8"
     )
 
-    log(f"📝 记录 {day} {hour}:00 状态 → {'在线' if is_online else '离线'}")
+    log(f"📝 记录 {day} {hour}:00 → {'在线' if is_online else '离线'}")
 
 # ================= 生成 30 天 × 24 小时 图 =================
 
@@ -104,7 +119,6 @@ def generate_uptime_heatmap():
     days = sorted(data.keys())[-30:]
 
     lines = []
-
     for h in range(23, -1, -1):
         hour = f"{h:02d}"
         row = []
@@ -114,13 +128,12 @@ def generate_uptime_heatmap():
         lines.append(f"{hour}  " + " ".join(row))
 
     footer = "     " + " ".join(days)
-
     return "\n".join(lines + ["", footer])
 
 # ================= 更新 README =================
 
-def update_readme(chart):
-    log("🧾 更新 README 在线状态图")
+def update_readme(chart: str):
+    log("🧾 更新 README")
 
     if not Path(README_FILE).exists():
         raise RuntimeError("README.md 不存在")
@@ -150,8 +163,16 @@ def update_readme(chart):
 def main():
     log("🚀 哪吒 README 状态任务启动")
 
-    jwt = nezha_login()
-    servers = fetch_servers(jwt)
+    session = create_session()
+
+    try:
+        servers = fetch_servers(session)
+    except PermissionError:
+        jwt = login(session)
+        servers = fetch_servers(session)
+        log("🔄 已使用新 Cookie 重新获取服务器列表")
+
+    log(f"📊 服务器总数: {len(servers)}")
 
     offline = [s for s in servers if not s.get("online", True)]
     log(f"🚨 离线服务器数量: {len(offline)}")

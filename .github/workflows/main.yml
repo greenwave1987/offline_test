@@ -1,5 +1,5 @@
 - name: Update Nezha README
-  run: python nezha_readme_status.py
+  run: python nezha.py
   env:
     NEZHA_URL: ${{ secrets.NEZHA_URL }}
     NEZHA_USERNAME: ${{ secrets.NEZHA_USERNAME }}

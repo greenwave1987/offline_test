@@ -3,20 +3,22 @@
 
 import os
 import json
-import subprocess
+import socket
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
 import requests
 
-# ================= 配置 =================
+# ================= 基础配置 =================
 
 NEZHA_URL = "https://nz.xmb.cc.cd"
 API_SERVER = "/api/v1/server"
 
 NEZHA_USER = os.getenv("NEZHA_USERNAME")
 NEZHA_PASS = os.getenv("NEZHA_PASSWORD")
-NEZHA_JWT  = os.getenv("NEZHA_JWT")
+NEZHA_JWT  = os.getenv("NEZHA_JWT")  # 推荐直接使用
 
 README_FILE = "README.md"
 DATA_FILE = Path("nezha_latency.json")
@@ -39,9 +41,9 @@ def create_session():
     s = requests.Session()
     if NEZHA_JWT:
         s.cookies.set("nz-jwt", NEZHA_JWT)
-        log("🍪 已注入 nz-jwt Cookie")
+        log("🍪 使用 nz-jwt Cookie")
     else:
-        log("⚠️ 未提供 nz-jwt，将依赖登录")
+        log("⚠️ 未提供 nz-jwt，将尝试登录")
     return s
 
 # ================= 登录 =================
@@ -60,13 +62,12 @@ def login(session):
 
     r.raise_for_status()
 
-    cookies = session.cookies.get_dict()
-    if "nz-jwt" not in cookies:
+    if "nz-jwt" not in session.cookies.get_dict():
         raise RuntimeError("❌ 登录失败：未获取 nz-jwt")
 
     log("✅ 登录成功，已获取 nz-jwt")
 
-# ================= 获取服务器（关键） =================
+# ================= 获取服务器 =================
 
 def fetch_servers(session):
     url = NEZHA_URL + API_SERVER
@@ -78,19 +79,19 @@ def fetch_servers(session):
     try:
         j = r.json()
     except Exception:
-        log("❌ 返回内容无法解析为 JSON")
+        log("❌ 返回内容不是 JSON")
         log(r.text[:300])
         raise
 
-    # ===== 关键修复点 =====
+    # ⚠️ 哪吒的坑：未授权也是 200
     if isinstance(j, dict) and j.get("error") == "ApiErrorUnauthorized":
-        log("🚫 接口返回 ApiErrorUnauthorized（虽然是 200）")
+        log("🚫 API 返回 ApiErrorUnauthorized（200）")
         raise PermissionError("API 未授权")
 
     if not isinstance(j, dict) or "data" not in j or not isinstance(j["data"], list):
         log("❌ JSON 结构异常")
         log(json.dumps(j, ensure_ascii=False)[:500])
-        raise RuntimeError("服务器数据结构异常")
+        raise RuntimeError("JSON 结构异常")
 
     log(f"✅ 成功获取服务器列表：{len(j['data'])} 台")
     return j["data"]
@@ -102,27 +103,27 @@ def is_online(last_active):
     now = datetime.now(timezone.utc)
     return (now - t.astimezone(timezone.utc)).total_seconds() <= OFFLINE_SECONDS
 
-# ================= Ping =================
+# ================= TCP 443 延迟 =================
 
-def ping_latency(ip):
+def tcp_latency(ip, port=443, timeout=2):
     try:
-        r = subprocess.run(
-            ["ping", "-c", "1", "-W", "1", ip],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True
+        start = time.perf_counter()
+
+        sock = socket.socket(
+            socket.AF_INET6 if ":" in ip else socket.AF_INET,
+            socket.SOCK_STREAM
         )
-        if r.returncode != 0:
-            return 0
+        sock.settimeout(timeout)
+        sock.connect((ip, port))
 
-        for line in r.stdout.splitlines():
-            if "time=" in line:
-                return float(line.split("time=")[1].split(" ")[0])
+        latency = (time.perf_counter() - start) * 1000
+        sock.close()
+
+        return round(latency, 1)
     except Exception:
-        pass
-    return 0
+        return 0
 
-# ================= 记录 =================
+# ================= 数据记录 =================
 
 def record_latency(results):
     now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
@@ -133,13 +134,16 @@ def record_latency(results):
 
     data[now] = results
 
+    # 只保留最近 48 次（约 24 小时）
     while len(data) > 48:
         data.pop(next(iter(data)))
 
-    DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    DATA_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2)
+    )
     log("📝 延迟数据已记录")
 
-# ================= 图 =================
+# ================= 图表生成 =================
 
 def generate_chart():
     if not DATA_FILE.exists():
@@ -153,39 +157,50 @@ def generate_chart():
         row = [s.ljust(18)]
         for t in data:
             v = data[t].get(s, 0)
-            row.append("▁" if v == 0 else
-                       "▂" if v < 50 else
-                       "▃" if v < 100 else
-                       "▄" if v < 200 else
-                       "█")
+            row.append(
+                "▁" if v == 0 else
+                "▂" if v < 50 else
+                "▃" if v < 100 else
+                "▄" if v < 200 else
+                "█"
+            )
         lines.append(" ".join(row))
 
     lines.append("")
-    lines.append("▁=离线 ▂<50ms ▃<100ms ▄<200ms █>=200ms")
+    lines.append("▁=不可达 ▂<50ms ▃<100ms ▄<200ms █>=200ms")
     return "\n".join(lines)
 
-# ================= README =================
+# ================= README 更新 =================
 
 def update_readme(chart):
-    content = Path(README_FILE).read_text(encoding="utf-8")
+    path = Path(README_FILE)
+    content = path.read_text(encoding="utf-8")
 
     block = (
         f"{START}\n"
-        "## 🌐 各服务器 Ping 延迟趋势\n\n"
+        "## 🌐 各服务器 TCP 443 延迟趋势\n\n"
         "```\n"
         f"{chart}\n"
         "```\n"
-        f"{END}"
+        f"{END}\n"
     )
 
-    new = content.split(START)[0] + block + content.split(END)[1]
-    Path(README_FILE).write_text(new, encoding="utf-8")
+    if START in content and END in content:
+        log("♻️ 检测到 NEZHA 区块，执行替换")
+        before = content.split(START)[0]
+        after = content.split(END)[1]
+        new_content = before + block + after
+    else:
+        log("➕ README 中不存在 NEZHA 区块，追加到末尾")
+        new_content = content.rstrip() + "\n\n" + block
+
+    path.write_text(new_content, encoding="utf-8")
     log("✅ README 更新完成")
 
 # ================= 主流程 =================
 
 def main():
-    log("🚀 哪吒延迟监控任务启动")
+    log("🚀 哪吒 TCP 延迟监控任务启动")
 
     session = create_session()
 
@@ -206,7 +221,7 @@ def main():
         )
 
         online = is_online(s["last_active"])
-        latency = ping_latency(ip) if (online and ip) else 0
+        latency = tcp_latency(ip) if (online and ip) else 0
 
         results[name] = latency
         log(f"{name}: {'在线' if online else '离线'} 延迟={latency}ms")

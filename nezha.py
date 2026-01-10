@@ -71,7 +71,7 @@ def fetch_servers(session: requests.Session):
     log("📡 请求服务器列表")
 
     r = session.get(
-        f"{NEZHA_URL}/api/v1/server/list",
+        f"{NEZHA_URL}/api/v1/server",
         timeout=10
     )
 

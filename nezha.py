@@ -58,7 +58,7 @@ def fetch_servers(jwt):
 
     url = f"{NEZHA_URL}/api/v1/server/list"
     headers = {
-        "Authorization": f"Bearer {jwt}"
+        "cookie": jwt
     }
 
     r = requests.get(url, headers=headers, timeout=10)

@@ -156,4 +156,77 @@ def generate_chart():
     servers = set(k for v in data.values() for k in v)
 
     lines = []
-    for s in
+    for s in sorted(servers):
+        row = [s.ljust(18)]
+        for t in data:
+            v = data[t].get(s, 0)
+            if v == 0:
+                row.append("▁")
+            elif v < 50:
+                row.append("▂")
+            elif v < 100:
+                row.append("▃")
+            elif v < 200:
+                row.append("▄")
+            else:
+                row.append("█")
+        lines.append(" ".join(row))
+
+    lines.append("")
+    lines.append("▁=0ms ▂<50 ▃<100 ▄<200 █>=200")
+
+    return "\n".join(lines)
+
+# ================= README =================
+
+def update_readme(chart):
+    content = Path(README_FILE).read_text(encoding="utf-8")
+
+    block = (
+        f"{START}\n"
+        "## 🌐 各服务器 Ping 延迟曲线\n\n"
+        "```\n"
+        f"{chart}\n"
+        "```\n"
+        f"{END}"
+    )
+
+    new = content.split(START)[0] + block + content.split(END)[1]
+    Path(README_FILE).write_text(new, encoding="utf-8")
+    log("✅ README 更新完成")
+
+# ================= 主入口 =================
+
+def main():
+    log("🚀 哪吒延迟监控任务启动")
+
+    session = create_session()
+
+    try:
+        servers = fetch_servers(session)
+    except PermissionError:
+        login(session)
+        servers = fetch_servers(session)
+
+    results = {}
+
+    for s in servers:
+        name = s.get("name", "unknown").strip()
+        ip = (
+            s.get("geoip", {}).get("ip", {}).get("ipv4_addr")
+            or s.get("geoip", {}).get("ip", {}).get("ipv6_addr")
+        )
+
+        online = is_online(s["last_active"])
+        latency = ping_latency(ip) if (online and ip) else 0
+
+        results[name] = latency
+        log(f"{name}: {'在线' if online else '离线'} 延迟={latency}ms")
+
+    record_latency(results)
+    update_readme(generate_chart())
+
+    log("🎉 任务完成")
+
+if __name__ == "__main__":
+    main()

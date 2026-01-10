@@ -13,7 +13,6 @@ from zoneinfo import ZoneInfo
 NEZHA_URL = os.getenv("NEZHA_URL", "").rstrip("/")
 NEZHA_USER = os.getenv("NEZHA_USERNAME")
 NEZHA_PASS = os.getenv("NEZHA_PASSWORD")
-NEZHA_JWT  = os.getenv("NEZHA_JWT")  # 可选，推荐
 
 README_FILE = "README.md"
 UPTIME_FILE = Path("nezha_uptime.json")
@@ -37,27 +36,20 @@ def create_session():
         "User-Agent": "Mozilla/5.0 (GitHub Actions)",
         "Accept": "application/json"
     })
-
-    if NEZHA_JWT:
-        s.cookies.set("nz-jwt", NEZHA_JWT)
-        log("🍪 已注入 nz-jwt Cookie")
-
     return s
 
-# ================= 登录 =================
+# ================= 登录（强制执行） =================
 
 def login(session):
     log("🔐 开始登录哪吒面板")
     log(f"POST {NEZHA_URL}/api/v1/login")
 
-    payload = {
-        "username": NEZHA_USER,
-        "password": NEZHA_PASS
-    }
-
     r = session.post(
         f"{NEZHA_URL}/api/v1/login",
-        json=payload,
+        json={
+            "username": NEZHA_USER,
+            "password": NEZHA_PASS
+        },
         timeout=15
     )
 
@@ -65,14 +57,14 @@ def login(session):
     r.raise_for_status()
 
     cookies = session.cookies.get_dict()
-    log(f"🍪 当前 Cookies: {cookies}")
+    log(f"🍪 登录后 Cookies: {cookies}")
 
     if "nz-jwt" not in cookies:
         raise RuntimeError("❌ 登录失败：未获取 nz-jwt")
 
     log("✅ 登录成功，nz-jwt 已获取")
 
-# ================= 获取服务器（唯一接口） =================
+# ================= 获取服务器（真实兼容） =================
 
 def fetch_servers(session):
     url = f"{NEZHA_URL}/api/v1/server"
@@ -80,26 +72,29 @@ def fetch_servers(session):
 
     r = session.get(url, timeout=15)
     log(f"HTTP 状态码: {r.status_code}")
-
-    if r.status_code in (401, 403):
-        raise PermissionError("Cookie 无效或过期")
-
     r.raise_for_status()
 
-    # 🚨 强制 JSON
     try:
         payload = r.json()
-    except Exception as e:
+    except Exception:
         log("❌ 返回内容不是 JSON")
-        raise RuntimeError("接口返回非 JSON") from e
+        log(r.text[:500])
+        raise
 
-    if not isinstance(payload, dict) or "data" not in payload:
-        raise RuntimeError("JSON 结构异常")
+    log("📦 原始 JSON 返回：")
+    log(json.dumps(payload, ensure_ascii=False)[:500])
 
-    servers = payload["data"]
+    servers = None
+
+    # === 结构兼容 ===
+    if isinstance(payload.get("data"), dict):
+        servers = payload["data"].get("servers")
+
+    if servers is None:
+        servers = payload.get("servers")
 
     if not isinstance(servers, list):
-        raise RuntimeError("服务器数据不是列表")
+        raise RuntimeError("❌ 无法从 JSON 中解析服务器列表")
 
     log(f"📊 服务器总数: {len(servers)}")
     offline = sum(1 for s in servers if not s.get("online", True))
@@ -121,7 +116,6 @@ def record_hour(online):
     data.setdefault(day, {})
     data[day][hour] = 1 if online else 0
 
-    # 只保留 30 天
     for d in sorted(data)[:-30]:
         del data[d]
 
@@ -182,12 +176,10 @@ def main():
 
     session = create_session()
 
-    try:
-        servers = fetch_servers(session)
-    except PermissionError:
-        log("⚠️ Cookie 失效，准备登录")
-        login(session)
-        servers = fetch_servers(session)
+    # 🔥 强制登录（你要的就是这个）
+    login(session)
+
+    servers = fetch_servers(session)
 
     online = any(s.get("online", True) for s in servers)
     record_hour(online)

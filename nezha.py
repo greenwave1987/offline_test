@@ -31,8 +31,8 @@ TCP_PORTS = [443, 80, 22]
 TCP_TIMEOUT = 3
 TLS_TIMEOUT = 4
 
-OFFLINE_THRESHOLD = 600      # 秒
-MAX_POINTS = 24              # 曲线点数
+OFFLINE_THRESHOLD = 600
+MAX_POINTS = 24
 
 # ================= 日志 =================
 
@@ -43,14 +43,11 @@ def log(msg):
 # ================= 时间解析 =================
 
 def parse_last_active(v):
-    if v is None:
-        return 0
     if isinstance(v, (int, float)):
         return int(v)
     if isinstance(v, str):
         try:
-            dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
-            return int(dt.timestamp())
+            return int(datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp())
         except Exception:
             return 0
     return 0
@@ -70,154 +67,107 @@ def create_session():
 
 def login(session):
     log("🔐 开始登录哪吒面板")
-
     r = session.post(
         f"{NEZHA_URL}/api/v1/login",
         json={"username": NEZHA_USER, "password": NEZHA_PASS},
         timeout=10
     )
-
     log(f"登录 HTTP 状态码: {r.status_code}")
-    log(f"登录返回内容: {r.text[:120]}")
+    log(f"登录返回内容: {r.text[:100]}")
     r.raise_for_status()
-
     if "nz-jwt" not in session.cookies.get_dict():
-        raise RuntimeError("登录失败：未获取 nz-jwt")
-
+        raise RuntimeError("登录失败")
     log("✅ 登录成功")
 
-# ================= 获取服务器 =================
+# ================= API =================
 
 def fetch_servers(session):
-    url = f"{NEZHA_URL}/api/v1/server"
-    log(f"📡 请求服务器接口: {url}")
-
-    r = session.get(url, timeout=10)
+    r = session.get(f"{NEZHA_URL}/api/v1/server", timeout=10)
     log(f"HTTP 状态码: {r.status_code}")
-
     j = r.json()
     if j.get("error") == "ApiErrorUnauthorized":
         raise PermissionError
-
-    data = j.get("data")
-    if not isinstance(data, list):
-        raise RuntimeError("JSON 结构异常")
-
+    data = j.get("data", [])
     log(f"✅ 成功获取服务器列表：{len(data)} 台")
     return data
 
-# ================= TCP / TLS =================
+# ================= 探测 =================
 
-def tcp_latency(ip, port):
+def tcp_latency(host, port):
     start = time.time()
     try:
-        with socket.create_connection((ip, port), timeout=TCP_TIMEOUT):
+        with socket.create_connection((host, port), timeout=TCP_TIMEOUT):
             return (time.time() - start) * 1000
     except Exception:
         return None
 
-def multi_port_tcp(ip):
+def multi_tcp(host):
     vals = []
     for p in TCP_PORTS:
-        d = tcp_latency(ip, p)
-        if d is not None:
+        d = tcp_latency(host, p)
+        if d:
             vals.append(d)
     return min(vals) if vals else None
 
-def tls_latency(ip):
+def tls_latency(host, server_name):
     ctx = ssl.create_default_context()
     start = time.time()
     try:
-        with socket.create_connection((ip, 443), timeout=TCP_TIMEOUT) as sock:
-            with ctx.wrap_socket(sock, server_hostname=ip):
+        with socket.create_connection((host, 443), timeout=TCP_TIMEOUT) as sock:
+            with ctx.wrap_socket(sock, server_hostname=server_name):
                 return (time.time() - start) * 1000
     except Exception:
         return None
 
-# ================= 数据记录 =================
+# ================= 数据 =================
 
-def record(latency_map):
+def record(lat_map):
     ts = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
-
     data = {}
     if DATA_FILE.exists():
         data = json.loads(DATA_FILE.read_text())
-
-    data[ts] = latency_map
-
+    data[ts] = lat_map
     for k in sorted(data)[:-MAX_POINTS]:
         del data[k]
-
     DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     log("📝 延迟数据已记录")
 
-# ================= 颜色 =================
+# ================= SVG =================
 
 def color_for(name):
-    h = hashlib.md5(name.encode()).hexdigest()
-    return f"#{h[:6]}"
-
-# ================= SVG 曲线 =================
+    return "#" + hashlib.md5(name.encode()).hexdigest()[:6]
 
 def generate_svg():
     if not DATA_FILE.exists():
         return "暂无数据"
 
     data = json.loads(DATA_FILE.read_text())
-    keys = list(data.keys())[-MAX_POINTS:]
-
+    keys = list(data.keys())
     servers = sorted({s for v in data.values() for s in v})
 
-    width = 720
-    height = 260
-    padding = 40
+    w, h, p = 720, 260, 40
+    maxv = max((v for d in data.values() for v in d.values()), default=100)
+    maxv = max(maxv, 100)
 
-    max_latency = max(
-        (v for d in data.values() for v in d.values()),
-        default=100
-    )
-    max_latency = max(max_latency, 100)
+    def x(i): return p + i * (w - 2*p) / max(len(keys)-1, 1)
+    def y(v): return h - p - v * (h - 2*p) / maxv
 
-    svg = [
-        f'<svg width="{width}" height="{height}" '
-        f'viewBox="0 0 {width} {height}" '
-        f'xmlns="http://www.w3.org/2000/svg">'
+    svg = [f'<svg width="{w}" height="{h}" xmlns="http://www.w3.org/2000/svg">']
+    svg += [
+        f'<line x1="{p}" y1="{p}" x2="{p}" y2="{h-p}" stroke="#888"/>',
+        f'<line x1="{p}" y1="{h-p}" x2="{w-p}" y2="{h-p}" stroke="#888"/>'
     ]
 
-    # 轴线
-    svg.append(f'<line x1="{padding}" y1="{padding}" '
-               f'x2="{padding}" y2="{height-padding}" stroke="#888"/>')
-    svg.append(f'<line x1="{padding}" y1="{height-padding}" '
-               f'x2="{width-padding}" y2="{height-padding}" stroke="#888"/>')
-
-    def x(i):
-        return padding + i * (width - 2*padding) / (len(keys)-1 or 1)
-
-    def y(v):
-        return height - padding - v * (height - 2*padding) / max_latency
-
-    for name in servers:
-        pts = []
-        for i, k in enumerate(keys):
-            v = data.get(k, {}).get(name, 0)
-            pts.append(f"{x(i)},{y(v)}")
-
+    for s in servers:
+        pts = [f"{x(i)},{y(data[k].get(s,0))}" for i,k in enumerate(keys)]
         svg.append(
-            f'<polyline fill="none" '
-            f'stroke="{color_for(name)}" '
-            f'stroke-width="2" '
-            f'points="{" ".join(pts)}"/>'
+            f'<polyline fill="none" stroke="{color_for(s)}" stroke-width="2" points="{" ".join(pts)}"/>'
         )
 
-    # 图例
-    lx = padding
-    ly = padding - 10
-    for name in servers:
-        svg.append(
-            f'<text x="{lx}" y="{ly}" font-size="10" '
-            f'fill="{color_for(name)}">{name}</text>'
-        )
-        lx += len(name) * 7 + 14
+    lx, ly = p, p-10
+    for s in servers:
+        svg.append(f'<text x="{lx}" y="{ly}" font-size="10" fill="{color_for(s)}">{s}</text>')
+        lx += len(s)*7 + 12
 
     svg.append("</svg>")
     return "\n".join(svg)
@@ -227,55 +177,53 @@ def generate_svg():
 def update_readme(svg):
     p = Path(README_FILE)
     content = p.read_text(encoding="utf-8") if p.exists() else ""
-
-    block = (
-        f"{START}\n"
-        "## 📈 哪吒节点 TCP / TLS 延迟曲线\n\n"
-        f"{svg}\n"
-        f"{END}"
-    )
-
+    block = f"{START}\n## 📈 哪吒节点 TCP / TLS 延迟\n\n{svg}\n{END}"
     if START in content and END in content:
-        new = content.split(START)[0] + block + content.split(END)[1]
+        content = content.split(START)[0] + block + content.split(END)[1]
     else:
-        new = content + "\n\n" + block
-
-    p.write_text(new, encoding="utf-8")
+        content += "\n\n" + block
+    p.write_text(content, encoding="utf-8")
     log("✅ README 更新完成")
 
-# ================= 主入口 =================
+# ================= 主程序 =================
 
 def main():
-    log("🚀 哪吒 TCP + TLS 延迟监控任务启动")
-
     session = create_session()
     try:
         servers = fetch_servers(session)
     except PermissionError:
-        log("♻️ 触发登录流程")
         login(session)
         servers = fetch_servers(session)
 
-    now_ts = int(time.time())
-    latency_map = {}
+    now = int(time.time())
+    lat_map = {}
 
     for s in servers:
-        name = s.get("name", "unknown").strip()
-        ip   = s.get("host")
+        name = s.get("name","unknown")
         last = parse_last_active(s.get("last_active"))
 
-        if not ip or now_ts - last > OFFLINE_THRESHOLD:
-            latency_map[name] = 0
+        # 🔥 关键修复：优先公网 IP
+        host = (
+            s.get("public_ip")
+            or s.get("ipv4")
+            or s.get("ipv6")
+            or s.get("host")
+        )
+
+        if not host or now - last > OFFLINE_THRESHOLD:
+            lat_map[name] = 0
             log(f"{name}: 离线")
             continue
 
-        tcp = multi_port_tcp(ip)
-        tls = tls_latency(ip) if tcp else None
-        latency_map[name] = round(tls or tcp or 0, 1)
+        tcp = multi_tcp(host)
+        tls = tls_latency(host, s.get("host") or host) if tcp else None
 
-        log(f"{name}: TCP={tcp and round(tcp,1)}ms TLS={tls and round(tls,1)}ms")
+        val = round(tls or tcp or 0, 1)
+        lat_map[name] = val
 
-    record(latency_map)
+        log(f"{name}: {val}ms")
+
+    record(lat_map)
     update_readme(generate_svg())
     log("🎉 任务完成")
 

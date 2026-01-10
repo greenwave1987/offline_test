@@ -73,7 +73,7 @@ def login_and_get_session():
         sys.exit(1)
 
     nz_jwt = cookies["nz-jwt"]
-    log(f"✅ 登录成功，Session: {nz-jwt[:6]}***{nz-jwt[-6:]}")
+    log(f"✅ 登录成功，cookies: {nz_jwt[:6]}***{nz_jwt[-6:]}")
 
     return sess
 

@@ -69,11 +69,11 @@ def login_and_get_session():
     cookies = sess.cookies.get_dict()
     log(f"cookies：{cookies}")
     if "nz-jwt" not in cookies:
-        log("❌ 未获取到 nz_session（账号或密码错误？）")
+        log("❌ 未获取到 nz-jwt（账号或密码错误？）")
         sys.exit(1)
 
-    nz_session = cookies["nz_session"]
-    log(f"✅ 登录成功，Session: {nz_session[:6]}***{nz_session[-6:]}")
+    nz-jwt = cookies["nz-jwt"]
+    log(f"✅ 登录成功，Session: {nz-jwt[:6]}***{nz-jwt[-6:]}")
 
     return sess
 

@@ -1,172 +1,169 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Nezha Monitor v1.14.12
-- 使用环境变量登录哪吒面板
-- 获取服务器状态
-- 生成 README.md 状态表
-"""
-
 import os
-import sys
+import json
 import requests
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
-# ===================== 环境变量 =====================
+# ================= 基础配置 =================
 
-BASE_URL = os.getenv("NEZHA_URL")
-USERNAME = os.getenv("NEZHA_USERNAME")
-PASSWORD = os.getenv("NEZHA_PASSWORD")
+NEZHA_URL = os.getenv("NEZHA_URL")          # https://nz.example.com
+NEZHA_USER = os.getenv("NEZHA_USERNAME")
+NEZHA_PASS = os.getenv("NEZHA_PASSWORD")
 
-TIMEOUT = 10
-README_PATH = "README.md"
+README_FILE = "README.md"
+UPTIME_FILE = Path("nezha_uptime.json")
 
-# ===================== 基础校验 =====================
+TZ = ZoneInfo("Asia/Shanghai")
 
-if not BASE_URL or not USERNAME or not PASSWORD:
-    print("❌ 缺少必要环境变量：")
-    print("NEZHA_URL / NEZHA_USERNAME / NEZHA_PASSWORD")
-    sys.exit(1)
+START_MARK = "<!-- NEZHA-UPTIME-START -->"
+END_MARK = "<!-- NEZHA-UPTIME-END -->"
 
-BASE_URL = BASE_URL.rstrip("/")
-
-# ===================== 日志 =====================
+# ================= 日志 =================
 
 def log(msg):
-    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}", flush=True)
+    now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{now}] {msg}")
 
-# ===================== 登录 =====================
+# ================= 登录 =================
 
-def login_and_get_session():
-    url = f"{BASE_URL}/api/v1/login"
-
-    headers = {
-        "Accept": "*/*",
-        "Content-Type": "application/json",
-        "User-Agent": "nezha-client/1.14.12",
-        "Origin": BASE_URL,
-        "Referer": f"{BASE_URL}/dashboard/login",
-    }
-
-    payload = {
-        "username": USERNAME,
-        "password": PASSWORD
-    }
-
-    sess = requests.Session()
-
+def nezha_login():
     log("🔐 正在登录哪吒面板")
-    resp = sess.post(url, json=payload, headers=headers, timeout=TIMEOUT)
 
-    log(f"HTTP 状态码: {resp.status_code}")
+    url = f"{NEZHA_URL}/api/v1/login"
+    payload = {
+        "username": NEZHA_USER,
+        "password": NEZHA_PASS
+    }
 
-    if resp.status_code != 200:
-        log("❌ 登录失败")
-        sys.exit(1)
+    r = requests.post(url, json=payload, timeout=10)
+    log(f"HTTP 状态码: {r.status_code}")
 
-    cookies = sess.cookies.get_dict()
-    log(f"cookies：{cookies}")
+    r.raise_for_status()
+
+    cookies = r.cookies.get_dict()
     if "nz-jwt" not in cookies:
-        log("❌ 未获取到 nz-jwt（账号或密码错误？）")
-        sys.exit(1)
+        raise RuntimeError("未获取到 nz-jwt")
 
-    nz_jwt = cookies["nz-jwt"]
-    log(f"✅ 登录成功，cookies: {nz_jwt[:6]}***{nz_jwt[-6:]}")
+    log("✅ 登录成功")
+    return cookies["nz-jwt"]
 
-    return sess
+# ================= 获取服务器 =================
 
-# ===================== 获取服务器 =====================
-
-def get_servers(sess):
-    url = f"{BASE_URL}/api/v1/server"
-
+def fetch_servers(jwt):
     log("📡 请求服务器列表 API")
-    resp = sess.get(url, timeout=TIMEOUT)
 
-    log(f"HTTP 状态码: {resp.status_code}")
+    url = f"{NEZHA_URL}/api/v1/server/list"
+    headers = {
+        "Authorization": f"Bearer {jwt}"
+    }
 
-    if resp.status_code != 200:
-        log("❌ API 请求失败，Session 可能失效")
-        sys.exit(1)
+    r = requests.get(url, headers=headers, timeout=10)
+    log(f"HTTP 状态码: {r.status_code}")
+    r.raise_for_status()
 
-    data = resp.json()
-    if "data" not in data:
-        log("❌ 返回数据结构异常")
-        sys.exit(1)
+    data = r.json().get("data", [])
+    log(f"📊 服务器总数: {len(data)}")
+    return data
 
-    return data["data"]
+# ================= 记录小时状态 =================
 
-# ===================== README 表格 =====================
+def record_hour_status(is_online: bool):
+    now = datetime.now(TZ)
+    day = now.strftime("%Y-%m-%d")
+    hour = now.strftime("%H")
 
-def generate_readme_table(servers):
-    rows = []
-    for s in servers:
-        online = s.get("online", True)
-        status = "✅ 在线" if online else "🚨 离线"
-        name = s.get("name", "-")
-        ip = s.get("ip", "-")
-        last = s.get("last_active", "-")
-        rows.append(f"| {status} | {name} | {ip} | {last} |")
+    data = {}
+    if UPTIME_FILE.exists():
+        data = json.loads(UPTIME_FILE.read_text(encoding="utf-8"))
 
-    now = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+    data.setdefault(day, {})
+    data[day][hour] = 1 if is_online else 0
 
-    table = [
-        "## 📊 哪吒服务器状态",
-        "",
-        "| 状态 | 名称 | IP | 最后活跃 |",
-        "|----|----|----|----|",
-        *rows,
-        "",
-        f"_更新时间：{now}（北京时间）_",
-    ]
+    # 只保留最近 30 天
+    for d in sorted(data.keys())[:-30]:
+        del data[d]
 
-    return "\n".join(table)
+    UPTIME_FILE.write_text(
+        json.dumps(data, ensure_ascii=False),
+        encoding="utf-8"
+    )
 
-def update_readme(table_md):
-    start = "<!-- NEZHA-STATUS-START -->"
-    end = "<!-- NEZHA-STATUS-END -->"
+    log(f"📝 记录 {day} {hour}:00 状态 → {'在线' if is_online else '离线'}")
 
-    if not os.path.exists(README_PATH):
-        log("❌ README.md 不存在")
-        sys.exit(1)
+# ================= 生成 30 天 × 24 小时 图 =================
 
-    with open(README_PATH, "r", encoding="utf-8") as f:
-        content = f.read()
+def generate_uptime_heatmap():
+    if not UPTIME_FILE.exists():
+        return "暂无数据"
 
-    if start not in content or end not in content:
-        log("❌ README 中缺少 NEZHA 标记区块")
-        sys.exit(1)
+    data = json.loads(UPTIME_FILE.read_text(encoding="utf-8"))
+    days = sorted(data.keys())[-30:]
 
-    new_block = f"{start}\n{table_md}\n{end}"
+    lines = []
 
-    before = content.split(start)[0]
-    after = content.split(end)[1]
+    for h in range(23, -1, -1):
+        hour = f"{h:02d}"
+        row = []
+        for d in days:
+            v = data.get(d, {}).get(hour, 0)
+            row.append("🟩" if v == 1 else "🟥")
+        lines.append(f"{hour}  " + " ".join(row))
 
-    new_content = before + new_block + after
+    footer = "     " + " ".join(days)
 
-    with open(README_PATH, "w", encoding="utf-8") as f:
-        f.write(new_content)
+    return "\n".join(lines + ["", footer])
 
-# ===================== 主流程 =====================
+# ================= 更新 README =================
+
+def update_readme(chart):
+    log("🧾 更新 README 在线状态图")
+
+    if not Path(README_FILE).exists():
+        raise RuntimeError("README.md 不存在")
+
+    content = Path(README_FILE).read_text(encoding="utf-8")
+
+    if START_MARK not in content or END_MARK not in content:
+        raise RuntimeError("README 中缺少 NEZHA 标记区块")
+
+    block = (
+        f"{START_MARK}\n"
+        "## 📈 最近 30 天在线热力图（每小时）\n\n"
+        "🟩 在线 🟥 离线\n\n"
+        "```\n"
+        f"{chart}\n"
+        "```\n"
+        f"{END_MARK}"
+    )
+
+    new_content = content.split(START_MARK)[0] + block + content.split(END_MARK)[1]
+    Path(README_FILE).write_text(new_content, encoding="utf-8")
+
+    log("✅ README 更新完成")
+
+# ================= 主流程 =================
 
 def main():
     log("🚀 哪吒 README 状态任务启动")
 
-    sess = login_and_get_session()
-    servers = get_servers(sess)
-
-    log(f"📊 服务器总数: {len(servers)}")
+    jwt = nezha_login()
+    servers = fetch_servers(jwt)
 
     offline = [s for s in servers if not s.get("online", True)]
     log(f"🚨 离线服务器数量: {len(offline)}")
 
-    log("🧾 生成 README 状态表")
-    table_md = generate_readme_table(servers)
+    any_online = any(s.get("online", True) for s in servers)
 
-    update_readme(table_md)
-    log("✅ README.md 已更新完成")
+    record_hour_status(any_online)
+
+    chart = generate_uptime_heatmap()
+    update_readme(chart)
+
+    log("🎉 任务完成")
 
 if __name__ == "__main__":
     main()

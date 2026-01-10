@@ -34,3 +34,20 @@ NEZHA-STATUS
 ```
 <!-- NEZHA-UPTIME-END -->
 
+<!-- NEZHA-LATENCY-START -->
+## 🌐 各服务器 TCP 443 延迟趋势
+
+```
+clawcloud-01       ▄
+galaxy-02          ▄
+galaxy-03          ▁
+huggingface-01     ▁
+huggingface-02     ▁
+icmp-01            ▁
+icmp-02            ▁
+incudal-2013       ▄
+railway            ▁
+
+▁=不可达 ▂<50ms ▃<100ms ▄<200ms █>=200ms
+```
+<!-- NEZHA-LATENCY-END -->

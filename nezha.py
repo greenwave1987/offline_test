@@ -61,8 +61,8 @@ def login(session):
 
 def fetch_servers(session):
     endpoints = [
+        "/api/v1/server",
         "/api/v1/server/list",
-        "/api/v1/servers",
         "/api/v1/monitor",
     ]
 

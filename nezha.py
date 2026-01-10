@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-# ================= 基础配置 =================
+# ================= 配置 =================
 
 NEZHA_URL = os.getenv("NEZHA_URL", "").rstrip("/")
 NEZHA_USER = os.getenv("NEZHA_USERNAME")
@@ -29,6 +29,9 @@ END   = "<!-- NEZHA-LATENCY-END -->"
 TCP_PORTS = [443, 80, 22]
 TCP_TIMEOUT = 3
 TLS_TIMEOUT = 4
+
+# 超过这个秒数 → 认为离线（10 分钟）
+OFFLINE_THRESHOLD = 600
 
 # ================= 日志 =================
 
@@ -77,16 +80,9 @@ def fetch_servers(session):
     r = session.get(url, timeout=10)
     log(f"HTTP 状态码: {r.status_code}")
 
-    if r.status_code != 200:
-        raise RuntimeError("服务器接口 HTTP 异常")
-
-    try:
-        j = r.json()
-    except Exception:
-        raise RuntimeError("返回不是 JSON")
+    j = r.json()
 
     if j.get("error") == "ApiErrorUnauthorized":
-        log("🚫 API 返回 ApiErrorUnauthorized（200）")
         raise PermissionError("未授权")
 
     data = j.get("data")
@@ -96,7 +92,7 @@ def fetch_servers(session):
     log(f"✅ 成功获取服务器列表：{len(data)} 台")
     return data
 
-# ================= TCP 探测 =================
+# ================= TCP / TLS =================
 
 def tcp_latency(ip, port):
     start = time.time()
@@ -114,8 +110,6 @@ def multi_port_tcp(ip):
             results.append(d)
     return min(results) if results else None
 
-# ================= TLS 延迟 =================
-
 def tls_latency(ip):
     ctx = ssl.create_default_context()
     start = time.time()
@@ -126,7 +120,7 @@ def tls_latency(ip):
     except Exception:
         return None
 
-# ================= 数据记录 =================
+# ================= 记录 =================
 
 def record(latency_map):
     ts = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
@@ -143,7 +137,7 @@ def record(latency_map):
     DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
     log("📝 延迟数据已记录")
 
-# ================= 图生成 =================
+# ================= 图 =================
 
 def generate_chart():
     if not DATA_FILE.exists():
@@ -195,7 +189,6 @@ def update_readme(chart):
     if START in content and END in content:
         new = content.split(START)[0] + block + content.split(END)[1]
     else:
-        log("➕ README 中不存在 NEZHA 区块，追加到末尾")
         new = content + "\n\n" + block
 
     p.write_text(new, encoding="utf-8")
@@ -215,16 +208,17 @@ def main():
         login(session)
         servers = fetch_servers(session)
 
+    now_ts = int(time.time())
     latency_map = {}
 
     for s in servers:
         name = s.get("name", "unknown")
         ip   = s.get("host", "")
-        online = s.get("online", False)
+        last = s.get("last_active", 0)
 
-        if not online or not ip:
+        if not ip or now_ts - last > OFFLINE_THRESHOLD:
             latency_map[name] = 0
-            log(f"{name}: 离线 延迟=0ms")
+            log(f"{name}: 离线（last_active 超时）")
             continue
 
         tcp = multi_port_tcp(ip)
@@ -233,7 +227,7 @@ def main():
         final = tls if tls is not None else (tcp or 0)
         latency_map[name] = round(final, 1)
 
-        log(f"{name}: 在线 TCP={tcp and round(tcp,1)}ms TLS={tls and round(tls,1)}ms")
+        log(f"{name}: TCP={tcp and round(tcp,1)}ms TLS={tls and round(tls,1)}ms")
 
     record(latency_map)
     update_readme(generate_chart())

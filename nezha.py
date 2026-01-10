@@ -4,7 +4,7 @@
 import os
 import json
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -18,6 +18,7 @@ README_FILE = "README.md"
 UPTIME_FILE = Path("nezha_uptime.json")
 
 TZ = ZoneInfo("Asia/Shanghai")
+OFFLINE_THRESHOLD = 60  # 秒
 
 START = "<!-- NEZHA-UPTIME-START -->"
 END   = "<!-- NEZHA-UPTIME-END -->"
@@ -38,7 +39,7 @@ def create_session():
     })
     return s
 
-# ================= 登录（强制执行） =================
+# ================= 登录 =================
 
 def login(session):
     log("🔐 开始登录哪吒面板")
@@ -62,9 +63,9 @@ def login(session):
     if "nz-jwt" not in cookies:
         raise RuntimeError("❌ 登录失败：未获取 nz-jwt")
 
-    log("✅ 登录成功，nz-jwt 已获取")
+    log("✅ 登录成功")
 
-# ================= 获取服务器（真实兼容） =================
+# ================= 获取服务器 =================
 
 def fetch_servers(session):
     url = f"{NEZHA_URL}/api/v1/server"
@@ -74,33 +75,27 @@ def fetch_servers(session):
     log(f"HTTP 状态码: {r.status_code}")
     r.raise_for_status()
 
-    try:
-        payload = r.json()
-    except Exception:
-        log("❌ 返回内容不是 JSON")
-        log(r.text[:500])
-        raise
+    payload = r.json()
 
-    log("📦 原始 JSON 返回：")
-    log(json.dumps(payload, ensure_ascii=False)[:500])
+    if not payload.get("success") or "data" not in payload:
+        raise RuntimeError("❌ JSON 结构异常")
 
-    servers = None
-
-    # === 结构兼容 ===
-    if isinstance(payload.get("data"), dict):
-        servers = payload["data"].get("servers")
-
-    if servers is None:
-        servers = payload.get("servers")
-
-    if not isinstance(servers, list):
-        raise RuntimeError("❌ 无法从 JSON 中解析服务器列表")
-
+    servers = payload["data"]
     log(f"📊 服务器总数: {len(servers)}")
-    offline = sum(1 for s in servers if not s.get("online", True))
-    log(f"🚨 离线服务器数: {offline}")
 
     return servers
+
+# ================= 在线判断 =================
+
+def is_online(server, now):
+    last_active_str = server.get("last_active")
+    if not last_active_str:
+        return False
+
+    last_active = datetime.fromisoformat(last_active_str)
+    diff = (now - last_active).total_seconds()
+
+    return diff <= OFFLINE_THRESHOLD
 
 # ================= 记录在线 =================
 
@@ -116,6 +111,7 @@ def record_hour(online):
     data.setdefault(day, {})
     data[day][hour] = 1 if online else 0
 
+    # 只保留 30 天
     for d in sorted(data)[:-30]:
         del data[d]
 
@@ -123,7 +119,7 @@ def record_hour(online):
         json.dumps(data, ensure_ascii=False, indent=2)
     )
 
-    log(f"📝 记录在线状态 {day} {hour}: {'在线' if online else '离线'}")
+    log(f"📝 记录 {day} {hour}: {'在线' if online else '离线'}")
 
 # ================= 生成图 =================
 
@@ -154,7 +150,7 @@ def update_readme(chart):
     block = (
         f"{START}\n"
         "## 📈 最近 30 天在线状态（每小时）\n\n"
-        "🟩 在线　🟥 离线\n\n"
+        "🟩 在线　🟥 离线（last_active 超过 60 秒）\n\n"
         "```\n"
         f"{chart}\n"
         "```\n"
@@ -175,14 +171,28 @@ def main():
     log("🚀 哪吒 README 状态任务启动")
 
     session = create_session()
-
-    # 🔥 强制登录（你要的就是这个）
     login(session)
 
     servers = fetch_servers(session)
 
-    online = any(s.get("online", True) for s in servers)
-    record_hour(online)
+    now = datetime.now(TZ)
+
+    online_servers = []
+    offline_servers = []
+
+    for s in servers:
+        name = s.get("name", "unknown")
+        if is_online(s, now):
+            online_servers.append(name)
+            log(f"🟢 在线: {name}")
+        else:
+            offline_servers.append(name)
+            log(f"🔴 离线: {name}")
+
+    overall_online = len(online_servers) > 0
+    log(f"📊 在线 {len(online_servers)} / 离线 {len(offline_servers)}")
+
+    record_hour(overall_online)
 
     chart = generate_chart()
     update_readme(chart)

@@ -9,6 +9,7 @@ NEZHA-STATUS
 <line x1="40" y1="220" x2="680" y2="220" stroke="#888"/>
 <polyline fill="none" stroke="#039278" stroke-width="2" points="40.0,220.0"/>
 <polyline fill="none" stroke="#4153f1" stroke-width="2" points="40.0,220.0"/>
+<polyline fill="none" stroke="#ca67d5" stroke-width="2" points="40.0,220.0"/>
 <polyline fill="none" stroke="#a27b1e" stroke-width="2" points="40.0,220.0"/>
 <polyline fill="none" stroke="#c09627" stroke-width="2" points="40.0,220.0"/>
 <polyline fill="none" stroke="#5e4eef" stroke-width="2" points="40.0,220.0"/>
@@ -18,12 +19,13 @@ NEZHA-STATUS
 <polyline fill="none" stroke="#0edf49" stroke-width="2" points="40.0,220.0"/>
 <text x="40" y="30" font-size="10" fill="#039278">	 galaxy-03</text>
 <text x="129" y="30" font-size="10" fill="#4153f1">clawcloud-01</text>
-<text x="225" y="30" font-size="10" fill="#a27b1e">galaxy-02</text>
-<text x="300" y="30" font-size="10" fill="#c09627">huggingface-01</text>
-<text x="410" y="30" font-size="10" fill="#5e4eef">huggingface-02</text>
-<text x="520" y="30" font-size="10" fill="#41fe18">icmp-01</text>
-<text x="581" y="30" font-size="10" fill="#a40f76">icmp-02</text>
-<text x="642" y="30" font-size="10" fill="#30d4ab">incudal-2013</text>
-<text x="738" y="30" font-size="10" fill="#0edf49">railway</text>
+<text x="225" y="30" font-size="10" fill="#ca67d5">frank-hare</text>
+<text x="307" y="30" font-size="10" fill="#a27b1e">galaxy-02</text>
+<text x="382" y="30" font-size="10" fill="#c09627">huggingface-01</text>
+<text x="492" y="30" font-size="10" fill="#5e4eef">huggingface-02</text>
+<text x="602" y="30" font-size="10" fill="#41fe18">icmp-01</text>
+<text x="663" y="30" font-size="10" fill="#a40f76">icmp-02</text>
+<text x="724" y="30" font-size="10" fill="#30d4ab">incudal-2013</text>
+<text x="820" y="30" font-size="10" fill="#0edf49">railway</text>
 </svg>
 <!-- NEZHA-LATENCY-END -->

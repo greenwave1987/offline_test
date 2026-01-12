@@ -208,12 +208,13 @@ def main():
         name = s.get("name","unknown")
         last = parse_last_active(s.get("last_active"))
 
+        # 🔥 修复 host 类型问题，确保传入字符串
         host = (
-            s.get("public_ip")
-            or s.get("ipv4")
-            or s.get("ipv6")
-            or s.get("host")
-        )
+            str(s.get("public_ip") or
+                s.get("ipv4") or
+                s.get("ipv6") or
+                s.get("host") or "")
+        ).strip()
 
         if not host or now - last > OFFLINE_THRESHOLD:
             lat_map[name] = 0

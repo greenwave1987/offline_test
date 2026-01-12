@@ -6,8 +6,7 @@ import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import base64
-import jwt
-import time
+
 # ================= 配置 =================
 NEZHA_URL = os.getenv("NEZHA_URL", "").rstrip("/")
 NEZHA_USER = os.getenv("NEZHA_USERNAME")

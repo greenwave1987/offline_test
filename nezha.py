@@ -13,7 +13,7 @@ NEZHA_PASS = os.getenv("NEZHA_PASSWORD")
 NEZHA_JWT = os.getenv("NEZHA_JWT")
 
 # GitHub Token，需要有 repo 权限
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GH_TOKEN = os.getenv("GH_TOKEN")
 
 TZ = ZoneInfo("Asia/Shanghai")
 
@@ -62,7 +62,7 @@ def fetch_servers(session):
 # ================= 修改 GitHub README =================
 def update_github_readme(repo_full_name, content):
     url = f"https://api.github.com/repos/{repo_full_name}/contents/README.md"
-    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
+    headers = {"Authorization": f"Bearer {GH_TOKEN}"}
 
     # 先获取当前 README
     r = requests.get(url, headers=headers)

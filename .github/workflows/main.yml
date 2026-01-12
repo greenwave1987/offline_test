@@ -39,4 +39,4 @@ jobs:
 
       # 5️⃣ 执行 Python 脚本
       - name: Run offline check
-        run: python ./check_offline.py
+        run: python ./nezha.py

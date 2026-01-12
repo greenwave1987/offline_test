@@ -1,17 +1,17 @@
-name: Update Galaxy README on Offline
+name: Check Galaxy Offline
 
-# 定时任务，每天 0 点和 12 点触发，也可以手动触发
+# 定时触发，也可以手动触发
 on:
   schedule:
-    - cron: "0 0,12 * * *"
+    - cron: "0 * * * *"  # 每小时检查一次
   workflow_dispatch:
 
 jobs:
-  update-readme:
+  check-offline:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ 检出仓库（脚本可以放在仓库里）
+      # 1️⃣ 检出仓库
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -27,9 +27,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 4️⃣ 设置环境变量
+      # 4️⃣ 检查并设置环境变量
       - name: Set environment variables
-        run: echo "环境变量已设置"
+        run: |
+          if [ -z "${{ secrets.NEZHA_URL }}" ]; then
+            echo "NEZHA_URL 未设置"
+            exit 1
+          fi
+          if [ -z "${{ secrets.NEZHA_USERNAME }}" ]; then
+            echo "NEZHA_USERNAME 未设置"
+            exit 1
+          fi
+          if [ -z "${{ secrets.NEZHA_PASSWORD }}" ]; then
+            echo "NEZHA_PASSWORD 未设置"
+            exit 1
+          fi
+          if [ -z "${{ secrets.GH_TOKEN }}" ]; then
+            echo "GH_TOKEN 未设置"
+            exit 1
+          fi
         env:
           NEZHA_URL: ${{ secrets.NEZHA_URL }}
           NEZHA_USERNAME: ${{ secrets.NEZHA_USERNAME }}
@@ -37,6 +53,12 @@ jobs:
           NEZHA_JWT: ${{ secrets.NEZHA_JWT }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
-      # 5️⃣ 执行 Python 脚本
+      # 5️⃣ 运行 Python 脚本
       - name: Run offline check
         run: python ./nezha.py
+        env:
+          NEZHA_URL: ${{ secrets.NEZHA_URL }}
+          NEZHA_USERNAME: ${{ secrets.NEZHA_USERNAME }}
+          NEZHA_PASSWORD: ${{ secrets.NEZHA_PASSWORD }}
+          NEZHA_JWT: ${{ secrets.NEZHA_JWT }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}

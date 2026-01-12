@@ -1,4 +1,4 @@
-name: Galaxy Offline Check
+name: NeZha Offline Check
 
 on:
   schedule:

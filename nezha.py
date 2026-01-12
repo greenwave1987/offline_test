@@ -21,17 +21,6 @@ SERVER_TO_REPO = {
     "galaxy-03": "greenwave1987/galaxy3"
 }
 
-JWT_SECRET_KEY = "3NHuZWQ5Ks7G9vWRV6nHUcS0SSylpRUBNtmLsg3stQ58BdB77vmKiipxavL5PSPSrTJ2Zt91Tpg1cSzAx8EhUxkH4orM8nOgniVpqlkhtEDnv7F4anUvlCsha8ScOG1Nd0DRRtqWA09rvvylz6ElavCJCFEszsIT5L6b7KiftsVUMs25EjGHD1DUeMtC55ExI6E0e3amzjOFLdMaXFvy1vvTwXEY0QN9xjfWYKNtwa7wRycNNB3ngn7kr020t3oH7JWbx5qpUyXmsiX9ZkIUPSg2wugZDvQXSRI7HvGIzUko1IMeL2JLdXQpruCER7hcfMDiGLno1iSK9u0OD89MlMrWduRAb8UHjj63BdortQMbASX05BJbnRRDA4by2dqB7hhmXTZmX27QEzXdqETlx8F9URHsFC1N7Q5ndNrXvdQOwP16spLVY3lEiDFpFAGPE7EGplDkunUBepiNrV909AkEcbdI2YfoUsVz40AdNYyrdDXj714eDRVGP6rPgexW"         # config.yaml 中的 jwt_secret_key
-EXPIRE_SECONDS = 3600                        # JWT 有效期，1小时
-# ================= 生成 JWT =================
-def generate_nz_jwt(username, secret, expire=3600):
-    payload = {
-        "username": username,
-        "exp": int(time.time()) + expire  # 到期时间
-    }
-    token = jwt.encode(payload, secret, algorithm="HS256")
-    return token
-
 # ================= 日志 =================
 def log(msg):
     now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
@@ -39,8 +28,6 @@ def log(msg):
 
 # ================= Session =================
 def create_session():
-    token = generate_nz_jwt(NEZHA_USER, JWT_SECRET_KEY, EXPIRE_SECONDS)
-    print(f"生成的 nz-jwt: {token}")
     log("🟢 创建 Session")
     s = requests.Session()
     if token:

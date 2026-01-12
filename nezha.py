@@ -94,17 +94,15 @@ def fetch_servers(session):
 # ================= 探测 =================
 
 def tcp_latency(host, port):
-    """TCP 延迟测量"""
     start = time.time()
     try:
         with socket.create_connection((host, port), timeout=TCP_TIMEOUT):
             elapsed = (time.time() - start) * 1000
             return round(elapsed, 1)
     except Exception:
-        return None  # 失败返回 None
+        return None
 
 def multi_tcp(host):
-    """测量多个 TCP 端口，返回最小延迟"""
     vals = []
     for p in TCP_PORTS:
         d = tcp_latency(host, p)
@@ -114,7 +112,6 @@ def multi_tcp(host):
     return min(vals) if vals else None
 
 def tls_latency(host, server_name):
-    """TLS 延迟测量"""
     ctx = ssl.create_default_context()
     start = time.time()
     try:
@@ -208,12 +205,11 @@ def main():
         name = s.get("name","unknown")
         last = parse_last_active(s.get("last_active"))
 
-        # 🔥 修复 host 类型问题，确保传入字符串
+        # 🔥 使用 geoip.ip 的公网 IPv4/IPv6
         host = (
-            str(s.get("public_ip") or
-                s.get("ipv4") or
-                s.get("ipv6") or
-                s.get("host") or "")
+            s.get("geoip", {}).get("ip", {}).get("ipv4_addr") or
+            s.get("geoip", {}).get("ip", {}).get("ipv6_addr") or
+            str(s.get("public_ip") or s.get("ipv4") or s.get("ipv6") or "")
         ).strip()
 
         if not host or now - last > OFFLINE_THRESHOLD:
@@ -222,9 +218,8 @@ def main():
             continue
 
         tcp = multi_tcp(host)
-        tls = tls_latency(host, s.get("host") or host)
+        tls = tls_latency(host, host)
 
-        # 优先使用 TLS，如果 TLS 不可达则使用 TCP
         val = round(tls if tls is not None else tcp if tcp is not None else 0, 1)
         lat_map[name] = val
 

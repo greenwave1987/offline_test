@@ -205,10 +205,10 @@ def main():
         name = s.get("name","unknown")
         last = parse_last_active(s.get("last_active"))
 
-        # 🔥 使用 geoip.ip 的公网 IPv4/IPv6
+        # 🔥 优先 IPv6，再 IPv4，再 fallback
         host = (
-            s.get("geoip", {}).get("ip", {}).get("ipv4_addr") or
             s.get("geoip", {}).get("ip", {}).get("ipv6_addr") or
+            s.get("geoip", {}).get("ip", {}).get("ipv4_addr") or
             str(s.get("public_ip") or s.get("ipv4") or s.get("ipv6") or "")
         ).strip()
 
@@ -228,6 +228,7 @@ def main():
     record(lat_map)
     update_readme(generate_svg())
     log("🎉 任务完成")
+
 
 if __name__ == "__main__":
     main()

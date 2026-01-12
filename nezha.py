@@ -29,7 +29,7 @@ def log(msg):
 def create_session():
     log("🟢 创建 Session")
     s = requests.Session()
-    if token:
+    if NEZHA_JWT:
         s.cookies.set("nz-jwt", NEZHA_JWT)
         log("🍪 使用 nz-jwt Cookie")
     else:

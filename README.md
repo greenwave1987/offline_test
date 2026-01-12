@@ -7,17 +7,17 @@ NEZHA-STATUS
 <svg width="720" height="260" xmlns="http://www.w3.org/2000/svg">
 <line x1="40" y1="40" x2="40" y2="220" stroke="#888"/>
 <line x1="40" y1="220" x2="680" y2="220" stroke="#888"/>
-<polyline fill="none" stroke="#039278" stroke-width="2" points="40.0,209.07420494699647"/>
-<polyline fill="none" stroke="#4153f1" stroke-width="2" points="40.0,204.43816254416961"/>
+<polyline fill="none" stroke="#039278" stroke-width="2" points="40.0,164.25658453695837"/>
+<polyline fill="none" stroke="#4153f1" stroke-width="2" points="40.0,136.27017841971113"/>
 <polyline fill="none" stroke="#a27b1e" stroke-width="2" points="40.0,40.0"/>
 <polyline fill="none" stroke="#c09627" stroke-width="2" points="40.0,220.0"/>
 <polyline fill="none" stroke="#5e4eef" stroke-width="2" points="40.0,220.0"/>
 <polyline fill="none" stroke="#41fe18" stroke-width="2" points="40.0,220.0"/>
 <polyline fill="none" stroke="#a40f76" stroke-width="2" points="40.0,220.0"/>
-<polyline fill="none" stroke="#30d4ab" stroke-width="2" points="40.0,196.63604240282686"/>
-<polyline fill="none" stroke="#4ce112" stroke-width="2" points="40.0,197.8939929328622"/>
-<polyline fill="none" stroke="#0edf49" stroke-width="2" points="40.0,193.0035335689046"/>
-<polyline fill="none" stroke="#34fcd2" stroke-width="2" points="40.0,198.40282685512366"/>
+<polyline fill="none" stroke="#30d4ab" stroke-width="2" points="40.0,220.0"/>
+<polyline fill="none" stroke="#4ce112" stroke-width="2" points="40.0,100.56074766355142"/>
+<polyline fill="none" stroke="#0edf49" stroke-width="2" points="40.0,81.29141886151231"/>
+<polyline fill="none" stroke="#34fcd2" stroke-width="2" points="40.0,109.27782497875954"/>
 <text x="40" y="30" font-size="10" fill="#039278">	 galaxy-03</text>
 <text x="129" y="30" font-size="10" fill="#4153f1">clawcloud-01</text>
 <text x="225" y="30" font-size="10" fill="#a27b1e">galaxy-02</text>

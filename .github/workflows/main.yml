@@ -1,8 +1,8 @@
-name: Check Galaxy Offline
+name: Galaxy Offline Check
 
 on:
   schedule:
-    - cron: "0 * * * *"  # 每小时运行一次
+    - cron: "0 * * * *"  # 每小时执行一次
   workflow_dispatch:
 
 jobs:
@@ -26,8 +26,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 4️⃣ 设置并检查环境变量
-      - name: Set environment variables
+      # 4️⃣ 检查必要环境变量
+      - name: Check environment variables
         run: |
           if [ -z "${{ secrets.NEZHA_URL }}" ]; then
             echo "❌ NEZHA_URL 未设置"
@@ -52,80 +52,9 @@ jobs:
           NEZHA_JWT: ${{ secrets.NEZHA_JWT }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
-      # 5️⃣ 执行 Python 脚本，只在 galaxy-02 或 galaxy-03 离线时提交
+      # 5️⃣ 执行 Python 脚本
       - name: Run offline check
-        run: |
-          python << 'EOF'
-          import os, requests, base64
-          from datetime import datetime
-          from zoneinfo import ZoneInfo
-
-          TZ = ZoneInfo("Asia/Shanghai")
-          NEZHA_URL = os.getenv("NEZHA_URL").rstrip("/")
-          NEZHA_USER = os.getenv("NEZHA_USERNAME")
-          NEZHA_PASS = os.getenv("NEZHA_PASSWORD")
-          NEZHA_JWT = os.getenv("NEZHA_JWT")
-          GH_TOKEN = os.getenv("GH_TOKEN")
-
-          SERVER_TO_REPO = {
-              "galaxy-02": "greenwave1987/galaxy2",
-              "galaxy-03": "greenwave1987/galaxy3"
-          }
-
-          def log(msg):
-              now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
-              print(f"[{now}] {msg}")
-
-          s = requests.Session()
-          if NEZHA_JWT:
-              s.cookies.set("nz-jwt", NEZHA_JWT)
-              log("🍪 使用 nz-jwt Cookie")
-
-          # 登录
-          if not NEZHA_JWT:
-              r = s.post(f"{NEZHA_URL}/api/v1/login", json={"username": NEZHA_USER,"password":NEZHA_PASS},timeout=10)
-              r.raise_for_status()
-              if "nz-jwt" not in s.cookies.get_dict():
-                  raise RuntimeError("登录失败")
-              log("✅ 登录成功")
-
-          # 获取服务器列表
-          r = s.get(f"{NEZHA_URL}/api/v1/server", timeout=10)
-          r.raise_for_status()
-          servers = r.json().get("data", [])
-
-          now_ts = int(datetime.now().timestamp())
-
-          for server in servers:
-              name = server.get("name", "")
-              last_active = server.get("last_active", 0)
-              try:
-                  last_ts = int(last_active)
-              except:
-                  try:
-                      last_ts = int(datetime.fromisoformat(last_active.replace("Z","+00:00")).timestamp())
-                  except:
-                      last_ts = 0
-
-              if name in SERVER_TO_REPO and now_ts - last_ts > 600:
-                  repo = SERVER_TO_REPO[name]
-                  log(f"⚠️ {name} 离线，更新 {repo} README")
-
-                  # 获取当前 README sha
-                  url = f"https://api.github.com/repos/{repo}/contents/README.md"
-                  headers = {"Authorization": f"Bearer {GH_TOKEN}"}
-                  r2 = requests.get(url, headers=headers)
-                  r2.raise_for_status()
-                  sha = r2.json()["sha"]
-
-                  # 提交 offline 内容
-                  content = f"offline\n\n修改时间: {datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S')}"
-                  encoded = base64.b64encode(content.encode()).decode()
-                  payload = {"message": f"标记 {repo} 为 offline","content": encoded,"sha": sha}
-                  r3 = requests.put(url, headers=headers, json=payload)
-                  r3.raise_for_status()
-                  log(f"✅ {repo} README 更新完成")
-          EOF
+        run: python ./nezha.py
         env:
           NEZHA_URL: ${{ secrets.NEZHA_URL }}
           NEZHA_USERNAME: ${{ secrets.NEZHA_USERNAME }}

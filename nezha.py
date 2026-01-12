@@ -60,16 +60,16 @@ def fetch_servers(session):
     return j.get("data", [])
 
 # ================= 修改 GitHub README =================
-def update_github_readme(repo_full_name, content):
+def update_github_readme(repo_full_name):
     url = f"https://api.github.com/repos/{repo_full_name}/contents/README.md"
     headers = {"Authorization": f"Bearer {GH_TOKEN}"}
 
-    # 先获取当前 README
+    # 获取当前 README 的 sha
     r = requests.get(url, headers=headers)
     r.raise_for_status()
-    data = r.json()
-    sha = data["sha"]  # 更新文件需要这个 sha
+    sha = r.json()["sha"]
 
+    # 构造新的内容
     timestamp = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
     new_content = f"offline\n\n修改时间: {timestamp}"
     import base64
@@ -99,6 +99,7 @@ def main():
     for s in servers:
         name = s.get("name", "unknown")
         last_active = s.get("last_active", 0)
+
         # 转换 last_active 为时间戳
         try:
             last_ts = int(last_active)
@@ -112,7 +113,7 @@ def main():
         if now - last_ts > 600:  # 离线阈值 10 分钟
             log(f"⚠️ {name} 离线")
             if name in SERVER_TO_REPO:
-                update_github_readme(SERVER_TO_REPO[name], "offline")
+                update_github_readme(SERVER_TO_REPO[name])
 
 if __name__ == "__main__":
     main()

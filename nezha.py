@@ -94,28 +94,34 @@ def fetch_servers(session):
 # ================= 探测 =================
 
 def tcp_latency(host, port):
+    """TCP 延迟测量"""
     start = time.time()
     try:
         with socket.create_connection((host, port), timeout=TCP_TIMEOUT):
-            return (time.time() - start) * 1000
+            elapsed = (time.time() - start) * 1000
+            return round(elapsed, 1)
     except Exception:
-        return None
+        return None  # 失败返回 None
 
 def multi_tcp(host):
+    """测量多个 TCP 端口，返回最小延迟"""
     vals = []
     for p in TCP_PORTS:
         d = tcp_latency(host, p)
-        if d:
+        log(f"🌐 {host} TCP {p} 延迟: {d}ms")
+        if d is not None:
             vals.append(d)
     return min(vals) if vals else None
 
 def tls_latency(host, server_name):
+    """TLS 延迟测量"""
     ctx = ssl.create_default_context()
     start = time.time()
     try:
         with socket.create_connection((host, 443), timeout=TCP_TIMEOUT) as sock:
             with ctx.wrap_socket(sock, server_hostname=server_name):
-                return (time.time() - start) * 1000
+                elapsed = (time.time() - start) * 1000
+                return round(elapsed, 1)
     except Exception:
         return None
 
@@ -202,7 +208,6 @@ def main():
         name = s.get("name","unknown")
         last = parse_last_active(s.get("last_active"))
 
-        # 🔥 关键修复：优先公网 IP
         host = (
             s.get("public_ip")
             or s.get("ipv4")
@@ -216,9 +221,10 @@ def main():
             continue
 
         tcp = multi_tcp(host)
-        tls = tls_latency(host, s.get("host") or host) if tcp else None
+        tls = tls_latency(host, s.get("host") or host)
 
-        val = round(tls or tcp or 0, 1)
+        # 优先使用 TLS，如果 TLS 不可达则使用 TCP
+        val = round(tls if tls is not None else tcp if tcp is not None else 0, 1)
         lat_map[name] = val
 
         log(f"{name}: {val}ms")

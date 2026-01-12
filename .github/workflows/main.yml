@@ -2,7 +2,7 @@ name: Galaxy Offline Check
 
 on:
   schedule:
-    - cron: "0 * * * *"  # 每小时执行一次
+    - cron: "0/30 * * * *"  # 每小时执行一次
   workflow_dispatch:
 
 jobs:

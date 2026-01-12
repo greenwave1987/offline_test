@@ -1,42 +1,42 @@
-name: Daily Update
+name: Update Galaxy README on Offline
 
+# 定时任务，每天 0 点和 12 点触发，也可以手动触发
 on:
   schedule:
-    - cron: '15 2 * * *'   # UTC 02:15 = 北京时间 10:15
+    - cron: "0 0,12 * * *"
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
-  update:
+  update-readme:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
+      # 1️⃣ 检出仓库（脚本可以放在仓库里）
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2️⃣ 设置 Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
+      # 3️⃣ 安装依赖
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Update Nezha README status
-        run: python nezha.py
+      # 4️⃣ 设置环境变量
+      - name: Set environment variables
+        run: echo "环境变量已设置"
         env:
           NEZHA_URL: ${{ secrets.NEZHA_URL }}
           NEZHA_USERNAME: ${{ secrets.NEZHA_USERNAME }}
           NEZHA_PASSWORD: ${{ secrets.NEZHA_PASSWORD }}
+          NEZHA_JWT: ${{ secrets.NEZHA_JWT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Commit README
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Update Nezha server status"
-          file_pattern: README.md
+      # 5️⃣ 执行 Python 脚本
+      - name: Run offline check
+        run: python ./check_offline.py

@@ -5,19 +5,16 @@ import os
 import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import base64
 
 # ================= 配置 =================
 NEZHA_URL = os.getenv("NEZHA_URL", "").rstrip("/")
 NEZHA_USER = os.getenv("NEZHA_USERNAME")
 NEZHA_PASS = os.getenv("NEZHA_PASSWORD")
 NEZHA_JWT = os.getenv("NEZHA_JWT")
-
-# GitHub Token，需要有 repo 权限
 GH_TOKEN = os.getenv("GH_TOKEN")
-
 TZ = ZoneInfo("Asia/Shanghai")
 
-# 服务器对应的 GitHub 仓库
 SERVER_TO_REPO = {
     "galaxy-02": "greenwave1987/galaxy2",
     "galaxy-03": "greenwave1987/galaxy3"
@@ -30,6 +27,7 @@ def log(msg):
 
 # ================= Session =================
 def create_session():
+    log("🟢 创建 Session")
     s = requests.Session()
     if NEZHA_JWT:
         s.cookies.set("nz-jwt", NEZHA_JWT)
@@ -46,6 +44,7 @@ def login(session):
         json={"username": NEZHA_USER, "password": NEZHA_PASS},
         timeout=10
     )
+    log(f"登录返回状态码: {r.status_code}")
     r.raise_for_status()
     if "nz-jwt" not in session.cookies.get_dict():
         raise RuntimeError("登录失败")
@@ -53,14 +52,20 @@ def login(session):
 
 # ================= 获取服务器列表 =================
 def fetch_servers(session):
+    log("🌐 获取服务器列表")
     r = session.get(f"{NEZHA_URL}/api/v1/server", timeout=10)
+    log(f"获取返回状态码: {r.status_code}")
+    r.raise_for_status()
     j = r.json()
     if j.get("error") == "ApiErrorUnauthorized":
         raise PermissionError
-    return j.get("data", [])
+    servers = j.get("data", [])
+    log(f"📃 获取到 {len(servers)} 台服务器")
+    return servers
 
 # ================= 修改 GitHub README =================
 def update_github_readme(repo_full_name):
+    log(f"✏️ 准备更新 {repo_full_name} README")
     url = f"https://api.github.com/repos/{repo_full_name}/contents/README.md"
     headers = {"Authorization": f"Bearer {GH_TOKEN}"}
 
@@ -68,11 +73,11 @@ def update_github_readme(repo_full_name):
     r = requests.get(url, headers=headers)
     r.raise_for_status()
     sha = r.json()["sha"]
+    log(f"🔑 获取到 README sha: {sha}")
 
     # 构造新的内容
     timestamp = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
     new_content = f"offline\n\n修改时间: {timestamp}"
-    import base64
     encoded_content = base64.b64encode(new_content.encode()).decode()
 
     # 提交更新
@@ -81,20 +86,26 @@ def update_github_readme(repo_full_name):
         "content": encoded_content,
         "sha": sha
     }
+    log(f"🚀 提交更新到 GitHub")
     r2 = requests.put(url, headers=headers, json=payload)
     r2.raise_for_status()
-    log(f"✅ 更新 {repo_full_name} README 完成")
+    log(f"✅ {repo_full_name} README 更新完成")
 
 # ================= 主程序 =================
 def main():
+    log("🟢 脚本开始执行")
     session = create_session()
+
+    # 获取服务器列表
     try:
         servers = fetch_servers(session)
     except PermissionError:
+        log("⚠️ 需要登录")
         login(session)
         servers = fetch_servers(session)
 
     now = int(datetime.now().timestamp())
+    log("🕒 开始遍历服务器检查离线状态")
 
     for s in servers:
         name = s.get("name", "unknown")
@@ -109,11 +120,19 @@ def main():
             except:
                 last_ts = 0
 
+        log(f"🔍 检查 {name}, last_active={last_ts}")
+
         # 离线判断
         if now - last_ts > 600:  # 离线阈值 10 分钟
             log(f"⚠️ {name} 离线")
             if name in SERVER_TO_REPO:
                 update_github_readme(SERVER_TO_REPO[name])
+            else:
+                log(f"ℹ️ {name} 不在需更新的列表中")
+        else:
+            log(f"✅ {name} 在线")
+
+    log("🎉 脚本执行完毕")
 
 if __name__ == "__main__":
     main()

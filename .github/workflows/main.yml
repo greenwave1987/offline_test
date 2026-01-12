@@ -35,7 +35,7 @@ jobs:
           NEZHA_USERNAME: ${{ secrets.NEZHA_USERNAME }}
           NEZHA_PASSWORD: ${{ secrets.NEZHA_PASSWORD }}
           NEZHA_JWT: ${{ secrets.NEZHA_JWT }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
       # 5️⃣ 执行 Python 脚本
       - name: Run offline check

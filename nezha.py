@@ -100,7 +100,7 @@ def update_github_readme2(url):
     
     r2 = requests.get(url)
     r2.raise_for_status()
-    log(f"✅ {访问} 访问完成")
+    log(f"✅ {url} 访问完成")
 # ================= 主程序 =================
 def main():
     log("🟢 脚本开始执行")

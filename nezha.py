@@ -19,6 +19,10 @@ SERVER_TO_REPO = {
     "galaxy-02": "greenwave1987/galaxy2",
     "galaxy-03": "greenwave1987/galaxy3"
 }
+SERVER_TO_REPO2 = {
+    "huggingface-02": "https://hug2.hndz.qzz.io",
+    "huggingface-01": "https://hg.hndz.qzz.io"
+}
 
 # ================= 日志 =================
 def log(msg):
@@ -90,7 +94,13 @@ def update_github_readme(repo_full_name):
     r2 = requests.put(url, headers=headers, json=payload)
     r2.raise_for_status()
     log(f"✅ {repo_full_name} README 更新完成")
-
+    
+def update_github_readme2(url):
+    log(f"✏️ 准备访问 {url} ")
+    
+    r2 = requests.get(url)
+    r2.raise_for_status()
+    log(f"✅ {访问} 访问完成")
 # ================= 主程序 =================
 def main():
     log("🟢 脚本开始执行")
@@ -127,6 +137,8 @@ def main():
             log(f"⚠️ {name} 离线")
             if name in SERVER_TO_REPO:
                 update_github_readme(SERVER_TO_REPO[name])
+            elif name in SERVER_TO_REPO2:
+                update_github_readme2(SERVER_TO_REPO2[name])
             else:
                 log(f"ℹ️ {name} 不在需更新的列表中")
         else:
